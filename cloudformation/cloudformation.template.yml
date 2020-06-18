@@ -15,37 +15,3 @@ Resources:
             "States": {
               "DeleteResource": {
                 "Type": "Task",
-                "Resource": "${DeleteResourceLambdaArn}",
-                "End": true,
-                "Retry": [{
-                    "ErrorEquals": ["States.ALL"],
-                    "IntervalSeconds": 1,
-                    "MaxAttempts": 3,
-                    "BackoffRate": 2
-                  }]
-              }
-            }
-          }
-        - DeleteResourceLambdaArn: !GetAtt
-            - DeleteResourceLambda
-            - Arn
-      RoleArn: !GetAtt
-        - StepFunctionRole
-        - Arn
-  StepFunctionRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub 'states.${AWS::Region}.amazonaws.com'
-            Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: lambda
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action: 'lambda:InvokeFunction'
-                Resource: '*'
