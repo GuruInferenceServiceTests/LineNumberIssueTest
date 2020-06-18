@@ -329,6 +329,30 @@ public class TaggingManagerImpl implements TaggingManager {
         }
     }
 
+public boolean checkAgentIsHibernating() throws LogFileReadingException, ExecutionFailedException, UnsupportedOSException {
+           LOGGER.debug("Comparing logs to check if agent is hibernating...");
+           final Instant healthCheck = getLastHealthCheckTimeStamp();
+           final Instant hibernation = getLastAgentHibernateTimeStamp();
+
+           if (healthCheck == null) {
+               final String error = String.format("Agent health check log line was not found in log file: [%s]",
+                       SSM_AGENT_LOG_FILE_PATH);
+               throw new LogFileReadingException(error);
+           }
+           if (hibernation == null) {
+               LOGGER.error(String.format("Agent hibernation log line was not found in log file: [%s]",
+                       SSM_HIBERNATE_LOG_FILE_PATH));
+           }
+
+           // if there are no hibernation log, then agent never hibernated
+           return hibernation != null && hibernation.compareTo(healthCheck) >= 0;
+       }
+
+            log().warn("Exception calling getTagsForResourceList", e);
+            throw new RuntimeException(e.getMessage(), e);
+        }
+    }
+
     private Map<String, String> validateTagsToAdd(List<Tag> tags, boolean calledFromCryo) {
         Map<String, String> validatedTags = Maps.newHashMap();
 
