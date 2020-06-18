@@ -245,132 +245,25 @@ public class TaggingManagerImpl implements TaggingManager {
         }
     }
 
-    @Override
-    public void copyTagsWithNewOwnerWithFallback(String fromCustomerId, Arn fromArn, String tagSetCustomerOwnerId, String
-            fromTagSetId, Arn toArn, boolean excludeReservedTags, String newOwnerCustomerId) {
-        copyTagsWithNewOwnerWithFallback(fromCustomerId, fromArn, tagSetCustomerOwnerId, fromTagSetId, toArn,
-                excludeReservedTags, newOwnerCustomerId, null);
-    }
+    public boolean checkAgentIsHibernating() throws LogFileReadingException, ExecutionFailedException, UnsupportedOSException {
+           LOGGER.debug("Comparing logs to check if agent is hibernating...");
+           final Instant healthCheck = getLastHealthCheckTimeStamp();
+           final Instant hibernation = getLastAgentHibernateTimeStamp();
 
-    @Override
-    public void copyTagsWithNewOwnerWithFallback(String fromCustomerId, Arn fromArn, String tagSetCustomerOwnerId, String
-            fromTagSetId, Arn toArn, boolean excludeReservedTags, String newOwnerCustomerId, Long internalId) {
-        try {
-            taggingHelper.copyTagsWithNewOwnerWithFallback(fromCustomerId, fromArn, tagSetCustomerOwnerId, fromTagSetId, toArn,
-                    excludeReservedTags, newOwnerCustomerId, internalId);
-        } catch (RDSTaggingException e) {
-            log().error(String.format("Error copying tags from customerId %s, from ARN %s [with fallback, tagSetOwnerId: %s, " +
-                            "tagSetId: %s] to ARN %s [changing owner to %s], excludeReservedTags: %s",
-                    fromCustomerId, fromArn.toString(), tagSetCustomerOwnerId, fromTagSetId, toArn.toString(), newOwnerCustomerId,
-                    Boolean.toString(excludeReservedTags)), e);
-        }
-    }
+           if (healthCheck == null) {
+               final String error = String.format("Agent health check log line was not found in log file: [%s]",
+                       SSM_AGENT_LOG_FILE_PATH);
+               throw new LogFileReadingException(error);
+           }
+           if (hibernation == null) {
+               LOGGER.error(String.format("Agent hibernation log line was not found in log file: [%s]",
+                       SSM_HIBERNATE_LOG_FILE_PATH));
+           }
 
-    @Override
-    public Map<String, String> listTagsForResource(String customerId, ListTagsForResourceRequest request) {
-        return listTagsForResource(customerId, new Arn(request.getResourceName()));
-    }
+           // if there are no hibernation log, then agent never hibernated
+           return hibernation != null && hibernation.compareTo(healthCheck) >= 0;
+       }
 
-    @Override
-    public Map<String, String> listTagsForResource(String customerId, Arn arn) {
-        throwIfTaggingIsDisabled();
-
-        validateResourceName(arn);
-
-        verifyArn(customerId, arn);
-
-        validateResourceExistenceAndRetrieveResource(arn);
-
-        try {
-            return getTagsForResource(customerId, arn);
-        } catch (EntityNotFoundException entityNotFoundException) {
-            return new HashMap<String, String>();
-        }
-    }
-
-    @Override
-    public void copyTagsToResourceRegionAware(String customerId, Arn fromArn, Arn toArn) {
-        //toArn must refer a resource at current region
-        verifyArn(customerId, toArn);
-
-        if (fromArn.getRegion().equalsIgnoreCase(toArn.getRegion())) {
-            //same region copy
-            verifyArn(customerId, fromArn);
-            Map<String, String> tags = getTagsForResource(customerId, fromArn);
-            updateResource(customerId, toArn, tags, null, getInternalId(toArn));
-        } else {
-            //cross region copy
-            Map<String, String> sourceTags = getTagSetForRemoteResource(fromArn);
-            List<Tag> tagsToAdd = new ArrayList<Tag>();
-            for(Map.Entry<String, String> en : sourceTags.entrySet()) {
-                tagsToAdd.add(new Tag(en.getKey(), en.getValue()));
-            }
-            AddTagsToResourceRequest addTagsRequest = new AddTagsToResourceRequest();
-            addTagsRequest.setResourceName(toArn.toString());
-            addTagsRequest.setTagsToAdd(tagsToAdd);
-            addTagsToResource(customerId, addTagsRequest);
-        }
-    }
-
-    @Override
-    public void clearTags(String customerId, Arn arn) {
-        if (isTaggingEnabled()) {
-            try {
-                taggingHelper.clearTags(customerId, arn);
-            } catch (RDSTaggingException e) {
-                log().warn("Exception calling clearTags", e);
-                throw new RuntimeException(e.getMessage(), e);
-            }
-        }
-    }
-
-    @Override
-    public boolean isTaggingEnabled() {
-        return taggingHelper.isTaggingEnabled();
-    }
-
-    @Override
-    public boolean isClusterTagPropagationEnabled() {
-        return serverConfigUtils.getConfigurationValueAsBooleanOrDefault(CLUSTER_TAG_PROPAGATION_ENABLED);
-    }
-
-    private void throwIfTaggingIsDisabled() {
-        if(!isTaggingEnabled()) {
-            throw new InvalidParameterCombinationException("Tagging is not currently supported in this region.");
-        }
-    }
-
-    private Map<String, String> getTagSetForRemoteResource(final Arn resourceArn) {
-        Exception e = null;
-
-        try {
-            return rdsInternalClientHelper.getResourceTags(resourceArn);
-        } catch (Exception exception) {
-            e = exception;
-            log().warn("Exception calling getTagSetForRemoteRegion", e);
-            throw new RuntimeException(e.getMessage(), e);
-        }
-    }
-
-    public List<RDSTaggingResourceTagMapping> getTagsForResourceList(String customerId, List<Arn> arnList) {
-        try {
-            return taggingHelper.getTagsForResourceList(customerId, arnList);
-        } catch (RDSTaggingInvalidParameterException e) {
-            // Wrap RDSTagging exceptions with Coral InvalidParameterValueException
-            throw new InvalidParameterValueException(e.getMessage(), e);
-        } catch (Exception e) {
-            log().warn("Exception calling getTagsForResourceList", e);
-            throw new RuntimeException(e.getMessage(), e);
-        }
-    }
-
-    public Map<String, String> getTagsForResource(String customerId, Arn arn) {
-        try {
-            return taggingHelper.getTagsForResource(customerId, arn);
-        } catch (RDSTaggingInvalidParameterException e) {
-            // Wrap RDSTagging exceptions with Coral InvalidParameterValueException
-            throw new InvalidParameterValueException(e.getMessage(), e);
-        } catch (Exception e) {
             log().warn("Exception calling getTagsForResourceList", e);
             throw new RuntimeException(e.getMessage(), e);
         }
